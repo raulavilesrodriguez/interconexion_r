@@ -1,8 +1,0 @@
-# ignore txt files
-*.txt
-
-# ignore excel files
-*.xlsx
-
-#ignore zip files
-*.zip

@@ -73,6 +73,14 @@ procesamiento_grupos <- function(documento){
 
 balances_1 <- "balances_2021_1.txt"
 grupos_eeff <- procesamiento_grupos(balances_1)
+grupos_eeff <- grupos_eeff |> select(RUC, NOMBRE,
+                                     `COSTO DE VENTAS Y PRODUCCIÓN`,
+                      GASTOS, `INGRESOS DE ACTIVIDADES ORDINARIAS`) |>
+              mutate(`7999` = `COSTO DE VENTAS Y PRODUCCIÓN` + GASTOS,
+                     `1005` = `INGRESOS DE ACTIVIDADES ORDINARIAS`)
+grupos_eeff <- grupos_eeff[, !names(grupos_eeff) %in% c(
+  "COSTO DE VENTAS Y PRODUCCIÓN", "GASTOS", "INGRESOS DE ACTIVIDADES ORDINARIAS"
+)]
 
 #Bd for enterprise
 procesamiento_empresas <- function(documento){
@@ -113,29 +121,70 @@ financial_state <- "balances_2021_2.txt"
 teleco_eeff <- procesamiento_empresas(financial_state)
 
 
-costos_gastos <- teleco_eeff |> select(NOMBRE, `7991`) |>
-  filter(`7991` !=0) |> arrange(desc(`7991`))
+costos_gastos <- teleco_eeff |> select(RUC, NOMBRE, `1005`, `7999`) |>
+  filter(`7999` !=0) |> arrange(desc(`7999`))
+costos_gastos <- rbind(costos_gastos, grupos_eeff)
 
 #Plot bars
-teleco_eeff |> select(NOMBRE, `7991`) |> filter(`7991` !=0) |> arrange(desc(`7991`)) |>
-  slice_max(`7991`, n = 15) |> mutate(NOMBRE = (reorder(NOMBRE, -`7991`))) |>
-  ggplot(aes(NOMBRE, `7991`)) + geom_col(position = "dodge", width=0.9, fill="#0E8388", color = "black") +
+costos_gastos |> select(NOMBRE, `7999`) |> filter(`7999` !=0) |> arrange(desc(`7999`)) |>
+  slice_max(`7999`, n = 15) |> mutate(NOMBRE = (reorder(NOMBRE, -`7999`))) |>
+  ggplot(aes(NOMBRE, `7999`)) + geom_col(position = "dodge", width=0.9, fill="#0E8388", color = "black") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  ylab("Costos") + xlab("")
+  ylab("Costos y Gastos") + xlab("")
 
 #plot density
-teleco_eeff |> select(`7991`) |> arrange(desc(`7991`)) |>
-  ggplot(aes(log10(`7991`))) + geom_density(fill="#94AF9F") +
+costos_gastos |> select(`7999`) |> arrange(desc(`7999`)) |>
+  ggplot(aes(log10(`7999`))) + geom_density(fill="#94AF9F") +
   labs(x = "Costos y gastos telco (normalizado)")
 
 # mean costos y gastos
-mean(costos_gastos$`7991`)
+mean(costos_gastos$`7999`)
 # sd costos y gastos
-sd(costos_gastos$`7991`)
+sd(costos_gastos$`7999`)
 
-teleco_eeff |> filter(RUC == 1791251237001) |> pull(`1005`)
+costos_gastos |> filter(RUC == 1791251237001) |> pull(`1005`)
 
-de <- str_view_all(we, modelo)
-de |> str_replace("\\s*", '')
+# internet telecom service
+sai <- read_excel('Abonados SAI art 34 IV 2021 CDRM.xls', sheet = 'SAI oct dic 21')
+sai <- sai[, -c(1,3:7)]
+colnames(sai) <- c('NOMBRE', 'sai_con')
+sai <- sai[-889,]
+costos_gastos <- costos_gastos |> left_join(sai, by = 'NOMBRE')
+
+# fixed telecom service
+stf <- read_xlsx("stf_2021.xlsx")
+colnames(stf)[2] <- "stf_con"
+costos_gastos <- costos_gastos |> left_join(stf, by = 'NOMBRE')
+
+# video telecom service
+avs <- read_xlsx("avs_2021.xlsx")
+colnames(avs)[2] <- "avs_con"
+avs <- avs |> filter(!is.na(avs_con))
+costos_gastos <- costos_gastos |> left_join(avs, by = 'NOMBRE')
+costos_gastos |> select(avs_con) |> filter(!is.na(avs_con)) |> sum()
+
+# sma telecom service
+sma <- read_xlsx("sma_2021.xlsx")
+costos_gastos <- costos_gastos |> left_join(sma, by = 'NOMBRE')
+
+# portador telecom service
+portador <- read_xls("5.1.1-Usuarios-enlaces-SPT-Diciembre-2022.xls", sheet = 'Abonados y enlaces')
+portador <- portador[-(1:8),]
+portador <- portador[(1:33), c(1,133)]
+colnames(portador) <- c('NOMBRE', 'portador_con')
+portador <- portador[-(1:3),]
+portador <- portador |> filter(!is.na(portador_con))|>
+  mutate(portador_con = as.numeric(portador_con))|>
+  arrange(desc(portador_con))
+costos_gastos <- costos_gastos |> left_join(portador, by = 'NOMBRE')
+
+
+costos_gastos <- costos_gastos |> mutate(costo_usuario = `7999`/(sai_con*12),
+                                         income_usuarios = `1005`/(sai_con*12),
+                                         profit = income_usuarios - costo_usuario) |>
+  arrange(desc(sai_con))
+costos_gastos |> filter(costo_usuario != Inf & !is.na(costo_usuario) ) |>
+  summarise(mean_costo_u = mean(costo_usuario),
+            mean_income_u = mean(income_usuarios))
 
 

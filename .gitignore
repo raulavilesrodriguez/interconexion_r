@@ -9,3 +9,4 @@
 
 #ignore pdf files
 *.pdf
+.Rproj.user
