@@ -169,8 +169,8 @@ costos_gastos <- costos_gastos |> left_join(sma, by = 'NOMBRE')
 
 # portador telecom service
 portador <- read_xls("5.1.1-Usuarios-enlaces-SPT-Diciembre-2022.xls", sheet = 'Abonados y enlaces')
-portador <- portador[-(1:8),]
-portador <- portador[(1:33), c(1,133)]
+portador <- portador[-(1:8),] #delet rows
+portador <- portador[(1:33), c(1,133)] # corresponding columns to 2021 year
 colnames(portador) <- c('NOMBRE', 'portador_con')
 portador <- portador[-(1:3),]
 portador <- portador |> filter(!is.na(portador_con))|>
@@ -178,13 +178,63 @@ portador <- portador |> filter(!is.na(portador_con))|>
   arrange(desc(portador_con))
 costos_gastos <- costos_gastos |> left_join(portador, by = 'NOMBRE')
 
+# trunking telecom service
+troncalizado <- read_xlsx("troncalizado_2021.xlsx")
+costos_gastos <- costos_gastos |> left_join(troncalizado, by = 'NOMBRE')
 
-costos_gastos <- costos_gastos |> mutate(costo_usuario = `7999`/(sai_con*12),
-                                         income_usuarios = `1005`/(sai_con*12),
-                                         profit = income_usuarios - costo_usuario) |>
-  arrange(desc(sai_con))
-costos_gastos |> filter(costo_usuario != Inf & !is.na(costo_usuario) ) |>
-  summarise(mean_costo_u = mean(costo_usuario),
-            mean_income_u = mean(income_usuarios))
+# satellite finals telecom service
+finales_satelite <- read_xlsx("finales_satelite_2021.xlsx")
+costos_gastos <- costos_gastos |> left_join(finales_satelite, by = 'NOMBRE')
+
+# segmento espacial telecom service
+segmento_espacial <- read_xlsx("segmento_espacial_2021.xlsx")
+costos_gastos <- costos_gastos |> left_join(segmento_espacial, by = 'NOMBRE')
+
+#calculus cost
+costos_gastos[is.na(costos_gastos)] <- 0
+
+costos_gastos <- costos_gastos |>
+  mutate(con_total = ifelse(sai_con >= portador_con, rowSums(across(c(
+    sai_con, stf_con, avs_con, sma_con, tronc_con, satelite_con, espacial_con
+  ))), rowSums(across(c(
+    portador_con, stf_con, avs_con, sma_con, tronc_con, satelite_con, espacial_con
+  )))),
+         costo_usuario = `7999`/(con_total*12),
+         income_usuarios = `1005`/(con_total*12),
+         profit = income_usuarios - costo_usuario) |>
+  filter(costo_usuario != Inf & !is.na(costo_usuario)) |>
+  mutate(servicio = ifelse(sai_con != 0 & rowSums(across(c(
+    stf_con, avs_con, sma_con, tronc_con, satelite_con, espacial_con
+  )))==0, "sai", ifelse(tronc_con !=0 & rowSums(across(c(
+    sai_con, portador_con, stf_con, avs_con, sma_con, satelite_con, espacial_con
+  )))==0, "troncalizado", ifelse(espacial_con !=0 & rowSums(across(c(
+    sai_con, portador_con, stf_con, avs_con, sma_con, satelite_con, tronc_con
+  )))==0, "espacial", ifelse(satelite_con !=0 & rowSums(across(c(
+    sai_con, portador_con, stf_con, avs_con, sma_con, tronc_con, espacial_con
+  )))==0, "satelital", ifelse(avs_con !=0 & rowSums(across(c(
+    sai_con, portador_con, stf_con, espacial_con, sma_con, satelite_con, tronc_con
+  )))==0, "avs", ifelse(stf_con !=0 & rowSums(across(c(
+    sai_con, portador_con, avs_con, sma_con, tronc_con, espacial_con, satelite_con
+  )))==0, "fija", ifelse(portador_con != 0 & rowSums(across(c(
+    sai_con, stf_con, avs_con, espacial_con, sma_con, satelite_con, tronc_con
+  )))==0, 'portador', 'sma_otros'))))))))
+
+#Plot bars
+costos_gastos |> mutate(NOMBRE = (reorder(NOMBRE, -costo_usuario))) |>
+  slice_min(costo_usuario, n = 15) |>
+  mutate(NOMBRE = (reorder(NOMBRE, costo_usuario))) |>
+  ggplot(aes(NOMBRE, costo_usuario, fill = servicio)) + geom_col(show.legend = FALSE) +
+  geom_col(position = "dodge", width=0.9, color = "black") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("Costo_Conexión") + xlab("")
+
+costos_gastos |> filter(servicio != "espacial") |>
+  ggplot(aes(log10(costo_usuario), fill = servicio)) + geom_density(alpha=.25) +
+  facet_wrap(~servicio, ncol = 2, scales = "free_x")
+  labs(x = "Costos y gastos telco (normalizado)")
+
+costos_gastos |> filter(servicio == "sai" ) |>
+  summarise(median_costo_u = median(costo_usuario),
+            median_income_u = median(income_usuarios))
 
 
