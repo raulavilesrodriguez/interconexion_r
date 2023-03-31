@@ -8,25 +8,27 @@ library(rsconnect)
 library(DT)
 
 # import the data
-
 info_fin <- read_excel('saiku-export_final.xlsx', sheet = "Sheet 1")
-#info_fin[is.na(info_fin)] <- 0
+info_fin[is.na(info_fin)] <- 0
 
 nombres <- function(x){
-  ifelse(x == 'J611001', 'fijos',
-         ifelse(x == 'J611002', 'tv_cable',
-                ifelse(x == 'J611003', 'portador',
-                       ifelse(x == 'J611004', 'sai',
-                              ifelse(x == 'J612001' | x == 'J612002' | x == 'J612003', 'móviles',
-                                     ifelse(x == 'J613001' | x == 'J613002', 'satélite', 0))))))
+  ifelse(x == 'J611001'| x == 'J611002' | x == 'J611003' | x == 'J611004', 'alámbricos',
+         ifelse(x == 'J612001' | x == 'J612002', 'inalámbricos',
+                ifelse(x == 'J613001', 'satelitales',
+                       ifelse(x == 'J619001' | x== 'J619002' | x== 'J619003' | x== 'J619004' | x== 'J619005', 'otros',
+                              0))))
 }
 servicios <- sapply(info_fin$`ACTIVIDAD ECONOMICA`, nombres)
 info_fin['servicios'] <- servicios
 
 fijos <- info_fin |> filter(MeasuresLevel == 'TOTAL COSTOS (797)') |>
-  group_by(servicios) |> filter(servicios == 'fijos')
+  group_by(servicios) |> filter(servicios == 'alámbricos')
 apply(fijos[, 5:18], 1, mean)
 apply(fijos[, 5:18], 1, max)
+
+info_fin <- info_fin |> pivot_longer(cols = 3:19, names_to = 'año', values_to = 'indicador') |>
+  filter(año != 2022)
+info_fin <- info_fin |> group_by(MeasuresLevel, servicios, año) |> summarise(valor = sum(indicador))
 
 #_____Read Super-Compañía files EEFF________
 desempaquetar <- function(paqueto){
@@ -72,8 +74,9 @@ procesamiento_grupos <- function(documento){
 }
 
 balances_1 <- "balances_2021_1.txt"
-grupos_eeff <- procesamiento_grupos(balances_1)
-grupos_eeff <- grupos_eeff |> select(RUC, NOMBRE,
+resultado_1 <- procesamiento_grupos(balances_1)
+df_grupo <- resultado_1
+grupos_eeff <- resultado_1 |> select(RUC, NOMBRE,
                                      `COSTO DE VENTAS Y PRODUCCIÓN`,
                       GASTOS, `INGRESOS DE ACTIVIDADES ORDINARIAS`) |>
               mutate(`7999` = `COSTO DE VENTAS Y PRODUCCIÓN` + GASTOS,
@@ -114,12 +117,15 @@ procesamiento_empresas <- function(documento){
                                          CIIU == 'J6190.05')
   df_tel <- teleco_eeff
   colnames(df_tel) <- total_col
-  teleco_eeff
+  list(teleco_eeff, df_tel)
 }
 
 financial_state <- "balances_2021_2.txt"
-teleco_eeff <- procesamiento_empresas(financial_state)
-
+results <- procesamiento_empresas(financial_state)
+teleco_eeff <- results[[1]]
+df_tel <- results[[2]]
+duplicated_names <- duplicated(colnames(df_tel))
+df_tel <- df_tel[!duplicated_names]
 
 costos_gastos <- teleco_eeff |> select(RUC, NOMBRE, `1005`, `7999`) |>
   filter(`7999` !=0) |> arrange(desc(`7999`))
@@ -230,11 +236,96 @@ costos_gastos |> mutate(NOMBRE = (reorder(NOMBRE, -costo_usuario))) |>
 
 costos_gastos |> filter(servicio != "espacial") |>
   ggplot(aes(log10(costo_usuario), fill = servicio)) + geom_density(alpha=.25) +
-  facet_wrap(~servicio, ncol = 2, scales = "free_x")
+  facet_wrap(~servicio, ncol = 2, scales = "free_x") +
   labs(x = "Costos y gastos telco (normalizado)")
 
 costos_gastos |> filter(servicio == "sai" ) |>
   summarise(median_costo_u = median(costo_usuario),
             median_income_u = median(income_usuarios))
 
+#in ggplot2 how to plot two densities at the same time and  facet_wrap in r
+df <- costos_gastos |> select(costo_usuario, income_usuarios, servicio)
+df <- df |> pivot_longer(cols = 1:2, names_to = "grupo", values_to = 'valores')
+df |> filter(servicio != "espacial") |>
+ggplot(aes(log10(valores), fill = grupo)) + geom_density(adjust=1.5, alpha=.25) +
+facet_wrap(~servicio, ncol = 2, scales = "free_x") +
+labs(x = "Costos y gastos telco (normalizado)")
+
+df |> filter(servicio != "espacial") |>
+  ggplot(aes(log10(valores), fill = grupo)) +
+  geom_density(adjust=1.5, alpha=.25) +
+  labs(x = "Costos y gastos telco (normalizado)")
+
+#________________Shiny_______________
+datos_1 <- list(info_fin, costos_gastos)
+
+itxApp <- function(){
+ui <- fluidPage(
+  theme = bslib::bs_theme(bootswatch = "sandstone"),
+  titlePanel('', windowTitle = "AIR_ITX"),
+  HTML(r"(
+         <h1 style="text-align:center">AIR DE INTERCONEXIÓN Y ACCESO</h1>
+         <h6 style="color:#FC2947;">
+         <a style="text-decoration: none"
+         target="_blank"
+         href="https://raulaviles.netlify.app/">
+         Designed by: Byron Raúl Avilés Rodríguez
+         </a>
+         </h6>
+    )"),
+  textOutput("panel"),
+  HTML(r"(<br>)"),
+  tabsetPanel(
+    id = "tabset",
+    tabPanel("Empresas Telecom",
+             sidebarLayout(
+               sidebarPanel(
+                  selectInput('setdata', 'BD Super Compañías',
+                              choices = c("General Histórico"="1",
+                                          "Por Empresa"="2")),
+                  selectInput('empresa', 'Empresa', choices = NULL)
+               ),
+               mainPanel(
+                  plotOutput('plot_general'),
+                  textOutput('prueba')
+               )
+             ),
+             fluidRow(
+               column(12,titlePanel(textOutput("titulo_tabla"))),
+               column(12, DT::dataTableOutput("my_tabla"))
+             )
+             ),
+    tabPanel("Análisis Costo")
+  )
+)
+
+server <- function(input, output, session) {
+  output$panel <- renderText({
+    paste("Actual Panel:", input$tabset)
+  })
+  data_1 <- reactive({
+    req(input$setdata) #to be known
+    tibble(datos_1[[as.numeric(input$setdata)]])
+  })
+  # Tables totals
+  entrada <- reactive(input$setdata)
+  observeEvent(data_1(),
+    if(colnames(data_1())[1]=="MeasuresLevel"){
+      string <- reactive(paste0(input$setdata))
+      output$prueba <- renderText(string())
+      updateSelectInput(session, "empresa", choices = colnames(data_1()[-3]))
+      output$my_tabla <- DT::renderDataTable(data_1(), rownames = FALSE)
+    }
+    else{
+      updateSelectInput(session, "empresa", choices = colnames(data_1())[-c(1,2)])
+      output$my_tabla <- DT::renderDataTable(data_1()|>select(any_of('NOMBRE'), any_of(input$empresa)), rownames = FALSE)
+    }
+  )
+
+}
+
+shinyApp(ui, server)
+}
+
+itxApp()
 
