@@ -79,9 +79,9 @@ resultado_1 <- procesamiento_grupos(balances_1)
 df_grupo <- resultado_1
 grupos_eeff <- resultado_1 |> select(RUC, NOMBRE,
                                      `COSTO DE VENTAS Y PRODUCCIÓN`,
-                      GASTOS, `INGRESOS DE ACTIVIDADES ORDINARIAS`) |>
-              mutate(`7999` = `COSTO DE VENTAS Y PRODUCCIÓN` + GASTOS,
-                     `1005` = `INGRESOS DE ACTIVIDADES ORDINARIAS`)
+                                     GASTOS, `INGRESOS DE ACTIVIDADES ORDINARIAS`) |>
+  mutate(`7999` = `COSTO DE VENTAS Y PRODUCCIÓN` + GASTOS,
+         `1005` = `INGRESOS DE ACTIVIDADES ORDINARIAS`)
 grupos_eeff <- grupos_eeff[, !names(grupos_eeff) %in% c(
   "COSTO DE VENTAS Y PRODUCCIÓN", "GASTOS", "INGRESOS DE ACTIVIDADES ORDINARIAS"
 )]
@@ -206,9 +206,9 @@ costos_gastos <- costos_gastos |>
   ))), rowSums(across(c(
     portador_con, stf_con, avs_con, sma_con, tronc_con, satelite_con, espacial_con
   )))),
-         costo_usuario = `7999`/(con_total*12),
-         income_usuarios = `1005`/(con_total*12),
-         profit = income_usuarios - costo_usuario) |>
+  costo_usuario = `7999`/(con_total*12),
+  income_usuarios = `1005`/(con_total*12),
+  profit = income_usuarios - costo_usuario) |>
   filter(costo_usuario != Inf & !is.na(costo_usuario)) |>
   mutate(servicio = ifelse(sai_con != 0 & rowSums(across(c(
     stf_con, avs_con, sma_con, tronc_con, satelite_con, espacial_con
@@ -248,9 +248,9 @@ costos_gastos |> filter(servicio == "sai" ) |>
 df <- costos_gastos |> select(costo_usuario, income_usuarios, servicio)
 df <- df |> pivot_longer(cols = 1:2, names_to = "grupo", values_to = 'valores')
 df |> filter(servicio != "espacial") |>
-ggplot(aes(log10(valores), fill = grupo)) + geom_density(adjust=1.5, alpha=.25) +
-facet_wrap(~servicio, ncol = 2, scales = "free_x") +
-labs(x = "Costos y gastos telco (normalizado)")
+  ggplot(aes(log10(valores), fill = grupo)) + geom_density(adjust=1.5, alpha=.25) +
+  facet_wrap(~servicio, ncol = 2, scales = "free_x") +
+  labs(x = "Costos y gastos telco (normalizado)")
 
 df |> filter(servicio != "espacial") |>
   ggplot(aes(log10(valores), fill = grupo)) +
@@ -259,16 +259,14 @@ df |> filter(servicio != "espacial") |>
 
 #________________Shiny_______________
 info_fin_tr <- info_fin |> pivot_wider(names_from = MeasuresLevel, values_from = valor)
-names(costos_gastos)[names(costos_gastos)== '1005'] <- 'ingresos'
-names(costos_gastos)[names(costos_gastos)== '7999'] <- 'costos_gastos'
 datos_1 <- list(info_fin_tr, costos_gastos)
 
 itxApp <- function(){
-ui <- fluidPage(
-  useShinyjs(),
-  theme = bslib::bs_theme(bootswatch = "sandstone"),
-  titlePanel('', windowTitle = "AIR_ITX"),
-  HTML(r"(
+  ui <- fluidPage(
+    useShinyjs(),
+    theme = bslib::bs_theme(bootswatch = "sandstone"),
+    titlePanel('', windowTitle = "AIR_ITX"),
+    HTML(r"(
          <h1 style="text-align:center">AIR DE INTERCONEXIÓN Y ACCESO</h1>
          <h6 style="color:#FC2947;">
          <a style="text-decoration: none"
@@ -278,111 +276,92 @@ ui <- fluidPage(
          </a>
          </h6>
     )"),
-  textOutput("panel"),
-  HTML(r"(<br>)"),
-  tabsetPanel(
-    id = "tabset",
-    tabPanel("Empresas Telecom",
-             sidebarLayout(
-               sidebarPanel(
-                  selectInput('setdata', 'BD Super Compañías',
-                              choices = c("General Histórico"="1",
-                                          "Por Empresa"="2")),
-                  selectInput('parametro', 'Parámetro', choices = NULL),
-                  selectInput('servicio', 'Servicio', choices = unique(info_fin_tr$servicios)),
-                  textOutput('mediana')
+    textOutput("panel"),
+    HTML(r"(<br>)"),
+    tabsetPanel(
+      id = "tabset",
+      tabPanel("Empresas Telecom",
+               sidebarLayout(
+                 sidebarPanel(
+                   selectInput('setdata', 'BD Super Compañías',
+                               choices = c("General Histórico"="1",
+                                           "Por Empresa"="2")),
+                   selectInput('parametro', 'Parámetro', choices = NULL),
+                   selectInput('servicio', 'Servicio', choices = unique(info_fin_tr$servicios))
+                 ),
+                 mainPanel(
+                   textOutput('titulo_gráfico'),
+                   plotOutput('plot_general_1'),
+                   plotOutput('plot_general_2')
+                 )
                ),
-               mainPanel(
-                 textOutput('titulo_gráfico'),
-                  plotOutput('plot_general_1'),
-                  plotOutput('plot_general_2')
+               fluidRow(
+                 column(12,titlePanel(textOutput("titulo_tabla"))),
+                 column(12, DT::dataTableOutput("my_tabla"))
                )
-             ),
-             fluidRow(
-               column(12,titlePanel(textOutput("titulo_tabla"))),
-               column(12, DT::dataTableOutput("my_tabla"))
-             )
-             ),
-    tabPanel("Análisis Costo")
-  )
-)
-
-server <- function(input, output, session) {
-  output$panel <- renderText({
-    paste("Pestaña Actual:", input$tabset)
-  })
-  data_1 <- reactive({
-    req(input$setdata) #to be known
-    tibble(datos_1[[as.numeric(input$setdata)]])
-  })
-  # Tables totals
-  observeEvent(data_1(),
-    if(colnames(data_1())[1]=="servicios"){
-      string <- reactive(paste0('HISTÓRICO INGRESOS, COSTOS Y GASTOS'))
-      output$titulo_tabla <- renderText(string())
-      freezeReactiveValue(input, 'parametro')
-      updateSelectInput(session, "parametro", choices = colnames(data_1()[-c(1,2)]))
-      show("servicio")
-      output$my_tabla <- DT::renderDataTable(data_1()|> filter(servicios == input$servicio) |>
-                             select(any_of('servicios'), any_of('año'), any_of(input$parametro)), rownames = FALSE)
-      output$plot_general_2 <- NULL
-      hide('plot_general_2')
-      show('plot_general_1')
-      output$plot_general_1 <- renderPlot({
-        req(data_1(), cancelOutput = TRUE)
-        req(input$servicio, cancelOutput = TRUE)
-        req(input$parametro, cancelOutput = TRUE)
-        ggplot(data_1()|> filter(.data[['servicios']] == input$servicio), aes(.data[['año']], .data[[input$parametro]])) +
-          geom_point(position = ggforce::position_auto())
-      }, res = 96)
-      output$mediana <- NULL
-    }
-    else{
-      string <- reactive(paste0('POR EMPRESA COSTOS Y GASTOS'))
-      output$titulo_tabla <- renderText(string())
-      freezeReactiveValue(input, 'parametro')
-      updateSelectInput(session, "parametro", choices = colnames(data_1())[-c(1,2,17)])
-      output$my_tabla <- DT::renderDataTable(data_1()|>
-                             select(any_of('NOMBRE'), any_of(input$parametro)), rownames = FALSE)
-      hide("servicio")
-      output$plot_general_1 <- NULL
-      hide('plot_general_1')
-      show('plot_general_2')
-      output$plot_general_2 <- renderPlot({
-        req(data_1())
-        req(input$parametro)
-        ggplot(data_1(), aes(log10(.data[[input$parametro]]))) +
-          geom_density(fill="#E94560")
-      })
-
-      mi_vector <- c('sai_con', 'stf_con', 'avs_con', 'sma_con',
-                     'portador_con', 'tronc_con', 'satelite_con', 'espacial_con')
-      filtrado_valor <- reactive({
-        if(input$parametro %in% mi_vector){
-          data_1()[[input$parametro]] |> sum()
-        }
-        else{
-          data_1()[[input$parametro]] |> median()
-        }
-      })
-      filtrado_texto <- reactive({
-        if(input$parametro %in% mi_vector){
-          paste("La suma de conexiones de ")
-        }
-        else{
-          paste("El valor de la mediana de ")
-        }
-      })
-
-      output$mediana <- renderText({
-        paste0(filtrado_texto(), input$parametro, " es: ", round(filtrado_valor(), digits = 2))})
-
-    }
+      ),
+      tabPanel("Análisis Costo")
+    )
   )
 
-}
+  server <- function(input, output, session) {
+    output$panel <- renderText({
+      paste("Pestaña Actual:", input$tabset)
+    })
+    data_1 <- reactive({
+      req(input$setdata) #to be known
+      tibble(datos_1[[as.numeric(input$setdata)]])
+    })
+    # Tables totals
+    observeEvent(data_1(),
+                 if(colnames(data_1())[1]=="servicios"){
+                   string <- reactive(paste0('HISTÓRICO INGRESOS, COSTOS Y GASTOS'))
+                   output$titulo_tabla <- renderText(string())
+                   freezeReactiveValue(input, 'parametro')
+                   updateSelectInput(session, "parametro", choices = colnames(data_1()[-c(1,2)]))
+                   show("servicio")
+                   output$my_tabla <- DT::renderDataTable(data_1()|> filter(servicios == input$servicio) |>
+                                                            select(any_of('servicios'), any_of('año'), any_of(input$parametro)), rownames = FALSE)
+                 }
+                 else{
+                   string <- reactive(paste0('POR EMPRESA COSTOS Y GASTOS'))
+                   output$titulo_tabla <- renderText(string())
+                   freezeReactiveValue(input, 'parametro')
+                   updateSelectInput(session, "parametro", choices = colnames(data_1())[-c(1,2,17)])
+                   output$my_tabla <- DT::renderDataTable(data_1()|>
+                                                            select(any_of('NOMBRE'), any_of(input$parametro)), rownames = FALSE)
+                   hide("servicio")
+                   })
 
-shinyApp(ui, server)
+    observeEvent(data_1(),
+                 if(colnames(data_1())[1]=="servicios"){
+                   output$plot_general_2 <- NULL
+                   hide('plot_general_2')
+                   show('plot_general_1')
+                   output$plot_general_1 <- renderPlot({
+                     req(data_1(), cancelOutput = TRUE)
+                     req(input$servicio, cancelOutput = TRUE)
+                     req(input$parametro, cancelOutput = TRUE)
+                     ggplot(data_1()|> filter(.data[['servicios']] == input$servicio), aes(.data[['año']], .data[[input$parametro]])) +
+                       geom_point(position = ggforce::position_auto())
+                   }, res = 96)
+                 }
+                 else{
+                   output$plot_general_1 <- NULL
+                   hide('plot_general_1')
+                   show('plot_general_2')
+                   output$plot_general_2 <- renderPlot({
+                     req(data_1())
+                     req(input$parametro)
+                     ggplot(data_1(), aes(log10(.data[[input$parametro]]))) +
+                       geom_density(fill="#E94560")
+                   })
+                 }
+                 )
+
+  }
+
+  shinyApp(ui, server)
 }
 
 itxApp()
