@@ -257,6 +257,18 @@ df |> filter(servicio != "espacial") |>
   geom_density(adjust=1.5, alpha=.25) +
   labs(x = "Costos y gastos telco (normalizado)")
 
+# Calculate the probability distribution
+costo_u <- costos_gastos$costo_usuario
+m <- mean(costo_u)
+s <- sd(costo_u)
+median_cost_u <- median(costo_u)
+pnorm(median_cost_u, m, s)
+income_u <- costos_gastos$income_usuarios
+median_income_u <- median(income_u)
+probabilidad <- 1-pnorm(median_income_u, m, s)
+
+median_conexiones <- median(costos_gastos$con_total)
+
 #________________Shiny_______________
 info_fin_tr <- info_fin |> pivot_wider(names_from = MeasuresLevel, values_from = valor)
 names(costos_gastos)[names(costos_gastos)== '1005'] <- 'ingresos'
@@ -290,8 +302,10 @@ ui <- fluidPage(
                                           "Por Empresa"="2")),
                   selectInput('parametro', 'Parámetro', choices = NULL),
                   selectInput('servicio', 'Servicio', choices = unique(info_fin_tr$servicios)),
-                  textOutput('mediana')
+                  span(textOutput('mediana'), style="font-weight:bold;
+                       font-family:sans-serif; color:#77037B"),
                ),
+
                mainPanel(
                  textOutput('titulo_gráfico'),
                   plotOutput('plot_general_1'),
@@ -303,7 +317,23 @@ ui <- fluidPage(
                column(12, DT::dataTableOutput("my_tabla"))
              )
              ),
-    tabPanel("Análisis Costo")
+    tabPanel("Análisis Impacto",
+             sidebarLayout(
+               sidebarPanel(
+                sliderInput('prob', 'Probabilidad (Función de distribución acumulativa CDF)', value = probabilidad, min = 0, max = 1),
+                numericInput('median_cost_u', 'Costo por Conexión', value = round(median_cost_u, 2), step = 0.1),
+                numericInput('median_income_u', 'Ingreso por Conexión', value = round(median_income_u, 2), step = 0.1),
+                sliderInput('var_itx', 'Porcentaje de cambio Itx', value = 0, min = 0, max = 0.2),
+                sliderInput('var_acceso', 'Porcentaje de cambio Acceso', value = 0, min = 0, max = 0.2),
+               ),
+               mainPanel(
+                textOutput('num_empresas'),
+                HTML(r"(<br>)"),
+                plotOutput('plot_resultado'),
+                HTML(r"(<br>)"),
+                tableOutput('table_final')
+               )
+             ))
   )
 )
 
@@ -333,7 +363,7 @@ server <- function(input, output, session) {
         req(input$servicio, cancelOutput = TRUE)
         req(input$parametro, cancelOutput = TRUE)
         ggplot(data_1()|> filter(.data[['servicios']] == input$servicio), aes(.data[['año']], .data[[input$parametro]])) +
-          geom_point(position = ggforce::position_auto())
+          geom_point(position = ggforce::position_auto(), color = '#FF5403')
       }, res = 96)
       output$mediana <- NULL
     }
@@ -356,7 +386,7 @@ server <- function(input, output, session) {
       })
 
       mi_vector <- c('sai_con', 'stf_con', 'avs_con', 'sma_con',
-                     'portador_con', 'tronc_con', 'satelite_con', 'espacial_con')
+                     'portador_con', 'tronc_con', 'satelite_con', 'espacial_con', 'con_total')
       filtrado_valor <- reactive({
         if(input$parametro %in% mi_vector){
           data_1()[[input$parametro]] |> sum()
@@ -379,7 +409,32 @@ server <- function(input, output, session) {
 
     }
   )
-
+  data_total <- reactive({
+    tibble(
+      indicador= c('ingresos', 'costos_gastos'),
+      valores_USD = c(input$median_income_u*median_conexiones*nrow(teleco_eeff)*input$prob,
+                 input$median_cost_u*median_conexiones*nrow(teleco_eeff)*input$prob*(1-input$var_itx-input$var_acceso))
+      )
+  })
+  utilidad <- reactive({data_total()[['valores_USD']][1]-data_total()[['valores_USD']][2]})
+  data_total_i <- reactive({
+    data_total() |> add_row(indicador = 'utilidad', valores_USD = utilidad())
+  })
+  beneficio_estado <- reactive({
+    ifelse(data_total_i()[['valores_USD']][3] > 0, data_total_i()[['valores_USD']][3]*0.25, 0)})
+  data_total_f <- reactive({
+    data_total_i() |> add_row(indicador = 'Beneficios Estado', valores_USD = beneficio_estado())
+  })
+  output$table_final <- renderTable(data_total_f())
+  output$num_empresas <- renderText({
+    paste0('No. Empresas beneficiadas: ', round(nrow(teleco_eeff)*input$prob))
+  })
+  output$plot_resultado <- renderPlot({
+    req(data_total_f()) |> mutate(indicador = (reorder(.data[['indicador']], - .data[['valores_USD']]))) |>
+    ggplot(aes(.data[['indicador']], .data[['valores_USD']], fill = .data[['valores_USD']])) +
+      geom_col() +
+      geom_text(aes(label= round(.data[['valores_USD']]), fontface = 'bold'), vjust= -0.25, color='#E7B10A')
+  })
 }
 
 shinyApp(ui, server)
